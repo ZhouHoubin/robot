@@ -4,23 +4,35 @@ import android.Manifest;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
-import android.util.Log;
+import android.text.TextUtils;
+import android.text.method.ScrollingMovementMethod;
 import android.view.View;
+import android.widget.ScrollView;
+import android.widget.TextView;
 
 import com.baidu.speech.EventListener;
 import com.baidu.speech.EventManager;
 import com.baidu.speech.EventManagerFactory;
 import com.baidu.speech.asr.SpeechConstant;
+import com.baidu.tts.client.SpeechError;
+import com.baidu.tts.client.SpeechSynthesizeBag;
+import com.baidu.tts.client.SpeechSynthesizer;
+import com.baidu.tts.client.SpeechSynthesizerListener;
+import com.baidu.tts.client.TtsMode;
 
+import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
+import z.houbin.robot.tuling.Tuling;
 import z.houbin.robot.util.AutoCheck;
 
-public class MainActivity extends BaseActivity implements EventListener {
+public class MainActivity extends BaseActivity implements EventListener, SpeechSynthesizerListener {
     private String permissions[] = {Manifest.permission.RECORD_AUDIO,
             Manifest.permission.ACCESS_NETWORK_STATE,
             Manifest.permission.INTERNET,
@@ -28,6 +40,11 @@ public class MainActivity extends BaseActivity implements EventListener {
             Manifest.permission.WRITE_EXTERNAL_STORAGE
     };
     private EventManager asr;
+    private TextView log;
+    private ScrollView scrollView;
+    private Tuling tuling;
+    private SpeechSynthesizer mSpeechSynthesizer;
+    private Handler handler = new Handler();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -43,30 +60,70 @@ public class MainActivity extends BaseActivity implements EventListener {
 
         asr = EventManagerFactory.create(this, "asr");
         asr.registerListener(this);
+
+        log = findViewById(R.id.log);
+        log.setMovementMethod(new ScrollingMovementMethod());
+        scrollView = (ScrollView) this.log.getParent();
+        tuling = new Tuling();
+
+        mSpeechSynthesizer = SpeechSynthesizer.getInstance();
+        mSpeechSynthesizer.setContext(this);
+        mSpeechSynthesizer.setSpeechSynthesizerListener(this);
+        mSpeechSynthesizer.setAppId("11221254");
+        mSpeechSynthesizer.setApiKey("rXVnHC2XmWL9xqyo2cagGs1Z", "4e532bfba5e86ac62ab85d6cbf0bc6f6");
+
+        new Thread() {
+            @Override
+            public void run() {
+                super.run();
+                mSpeechSynthesizer.auth(TtsMode.ONLINE);
+                mSpeechSynthesizer.setParam(SpeechSynthesizer.PARAM_SPEAKER, "4");
+                mSpeechSynthesizer.setParam(SpeechSynthesizer.PARAM_SPEED, "3");
+                mSpeechSynthesizer.setStereoVolume(0.5f, 0.5f);
+                mSpeechSynthesizer.initTts(TtsMode.ONLINE);
+            }
+        }.start();
     }
 
     @Override
     public void onEvent(String name, String params, byte[] data, int offset, int length) {
-        String logTxt = "name: " + name;
-        if (params != null && !params.isEmpty()) {
-            logTxt += " ;params :" + params;
-        }
-        switch (name){
+        switch (name) {
             case SpeechConstant.CALLBACK_EVENT_ASR_EXIT:
+                log("\r\n识别结束");
+                break;
             case SpeechConstant.ASR_CANCEL:
-                start();
+                log("\r\n取消");
                 break;
         }
-        if (name.equals(SpeechConstant.CALLBACK_EVENT_ASR_PARTIAL)) {
-            if (params.contains("\"nlu_result\"")) {
-                if (length > 0 && data.length > 0) {
-                    logTxt += ", 语义解析结果：" + new String(data, offset, length);
+        if (name.equals(SpeechConstant.CALLBACK_EVENT_ASR_PARTIAL) && !TextUtils.isEmpty(params)) {
+            if (params.contains("final_result")) {
+                JSONObject object = null;
+                try {
+                    object = new JSONObject(params);
+                    final String speak = object.getString("best_result");
+                    log("\r\n发:" + speak);
+                    tuling.request(speak, new Tuling.CallBack() {
+                        @Override
+                        public void onCall(List<String> text) {
+                            List<SpeechSynthesizeBag> bags = new ArrayList<SpeechSynthesizeBag>();
+                            for (final String str : text) {
+                                log("\r\n收:" + str);
+                                SpeechSynthesizeBag speechSynthesizeBag = new SpeechSynthesizeBag();
+                                //需要合成的文本text的长度不能超过1024个GBK字节。
+                                speechSynthesizeBag.setText(str);
+                                speechSynthesizeBag.setUtteranceId("0");
+                                bags.add(speechSynthesizeBag);
+
+                            }
+                            int result = mSpeechSynthesizer.batchSpeak(bags);
+                            log(result + "");
+                        }
+                    });
+                } catch (JSONException e) {
+                    e.printStackTrace();
                 }
             }
-        } else if (data != null) {
-            logTxt += " ;data length=" + data.length;
         }
-        log(logTxt);
     }
 
     public void wakeup(View view) {
@@ -83,27 +140,33 @@ public class MainActivity extends BaseActivity implements EventListener {
         //params.put(SpeechConstant.VAD_ENDPOINT_TIMEOUT, 0); // 长语音
         params.put(SpeechConstant.VAD_ENDPOINT_TIMEOUT, 800); // 静音800毫秒后断句返回识别结果
         params.put(SpeechConstant.VAD, SpeechConstant.VAD_DNN);
-        (new AutoCheck(getApplicationContext(), new Handler() {
-            public void handleMessage(Message msg) {
-                if (msg.what == 100) {
-                    AutoCheck autoCheck = (AutoCheck) msg.obj;
-                    synchronized (autoCheck) {
-                        String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
-                        log(message + "\n");
-                        ; // 可以用下面一行替代，在logcat中查看代码
-                        // Log.w("AutoCheckMessage", message);
-                    }
-                }
-            }
-        }, false)).checkAsr(params);
+//        (new AutoCheck(getApplicationContext(), new Handler() {
+//            public void handleMessage(Message msg) {
+//                if (msg.what == 100) {
+//                    AutoCheck autoCheck = (AutoCheck) msg.obj;
+//                    synchronized (autoCheck) {
+//                        String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
+//                        log(message + "\n");
+//                        ; // 可以用下面一行替代，在logcat中查看代码
+//                        // Log.w("AutoCheckMessage", message);
+//                    }
+//                }
+//            }
+//        }, false)).checkAsr(params);
 
         String json = new JSONObject(params).toString(); // 这里可以替换成你需要测试的json
         asr.send(event, json, null, 0, 0);
         log("输入参数：" + json);
     }
 
-    private void log(String log) {
-        Log.d("Robot", log);
+    private void log(final String log) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                MainActivity.this.log.append(log);
+                scrollView.fullScroll(ScrollView.FOCUS_DOWN);
+            }
+        });
     }
 
     @Override
@@ -115,5 +178,40 @@ public class MainActivity extends BaseActivity implements EventListener {
     public void stop(View view) {
         log("停止识别：ASR_STOP");
         asr.send(SpeechConstant.ASR_STOP, null, null, 0, 0); //
+    }
+
+    @Override
+    public void onSynthesizeStart(String s) {
+
+    }
+
+    @Override
+    public void onSynthesizeDataArrived(String s, byte[] bytes, int i) {
+
+    }
+
+    @Override
+    public void onSynthesizeFinish(String s) {
+
+    }
+
+    @Override
+    public void onSpeechStart(String s) {
+
+    }
+
+    @Override
+    public void onSpeechProgressChanged(String s, int i) {
+
+    }
+
+    @Override
+    public void onSpeechFinish(String s) {
+        start();
+    }
+
+    @Override
+    public void onError(String s, SpeechError speechError) {
+
     }
 }

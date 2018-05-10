@@ -16,11 +16,7 @@ android {
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
-    sourceSets {
-        main {
-            jniLibs.srcDirs = ['libs']
-        }
-    }
+
 }
 
 dependencies {
@@ -31,4 +27,5 @@ dependencies {
     androidTestImplementation 'com.android.support.test:runner:1.0.2'
     androidTestImplementation 'com.android.support.test.espresso:espresso-core:3.0.2'
     implementation files('libs/bdasr_V3_20180320_9066860.jar')
+    implementation files('libs/com.baidu.tts_2.3.1.20170808_e39ea89.jar')
 }
