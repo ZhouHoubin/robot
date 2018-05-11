@@ -44,7 +44,7 @@ public class Tuling {
             }
         } catch (IOException e) {
             e.printStackTrace();
-        } catch (JSONException e) {
+        } catch (Exception e) {
             e.printStackTrace();
         }
         return result;

@@ -31,6 +31,7 @@ import java.util.Map;
 
 import z.houbin.robot.tuling.Tuling;
 import z.houbin.robot.util.AutoCheck;
+import z.houbin.robot.util.SpeechUtils;
 
 public class MainActivity extends BaseActivity implements EventListener, SpeechSynthesizerListener {
     private String permissions[] = {Manifest.permission.RECORD_AUDIO,
@@ -44,7 +45,22 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
     private ScrollView scrollView;
     private Tuling tuling;
     private SpeechSynthesizer mSpeechSynthesizer;
-    private Handler handler = new Handler();
+    private Handler handler = new Handler() {
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            if (msg.what == 100) {
+                AutoCheck autoCheck = (AutoCheck) msg.obj;
+                synchronized (autoCheck) {
+                    String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
+                    log(message + "\n");
+                    //可以用下面一行替代，在logcat中查看代码
+                    // Log.w("AutoCheckMessage", message);
+                }
+            }
+        }
+    };
+    private boolean isSpeak;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -87,41 +103,55 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
 
     @Override
     public void onEvent(String name, String params, byte[] data, int offset, int length) {
+        try {
+            log("\r\n" + name);
+        } catch (Exception e) {
+            //e.printStackTrace();
+        }
         switch (name) {
             case SpeechConstant.CALLBACK_EVENT_ASR_EXIT:
-                log("\r\n识别结束");
+                if (!isSpeak) {
+                    startInMain();
+                }
                 break;
             case SpeechConstant.ASR_CANCEL:
-                log("\r\n取消");
                 break;
         }
         if (name.equals(SpeechConstant.CALLBACK_EVENT_ASR_PARTIAL) && !TextUtils.isEmpty(params)) {
-            if (params.contains("final_result")) {
-                JSONObject object = null;
-                try {
-                    object = new JSONObject(params);
-                    final String speak = object.getString("best_result");
-                    log("\r\n发:" + speak);
-                    tuling.request(speak, new Tuling.CallBack() {
-                        @Override
-                        public void onCall(List<String> text) {
-                            List<SpeechSynthesizeBag> bags = new ArrayList<SpeechSynthesizeBag>();
-                            for (final String str : text) {
-                                log("\r\n收:" + str);
-                                SpeechSynthesizeBag speechSynthesizeBag = new SpeechSynthesizeBag();
-                                //需要合成的文本text的长度不能超过1024个GBK字节。
-                                speechSynthesizeBag.setText(str);
-                                speechSynthesizeBag.setUtteranceId("0");
-                                bags.add(speechSynthesizeBag);
-
+            try {
+                JSONObject jsonObject = new JSONObject(params);
+                String type = jsonObject.getString("result_type");
+                log("\r\ntype:" + type);
+                switch (type) {
+                    case "final_result":
+                        final String speak = jsonObject.getString("best_result");
+                        log("\r\n发:" + speak);
+                        isSpeak = true;
+                        tuling.request(speak, new Tuling.CallBack() {
+                            @Override
+                            public void onCall(List<String> text) {
+                                if (text.isEmpty()) {
+                                    isSpeak = false;
+                                    startInMain();
+                                    return;
+                                }
+                                List<SpeechSynthesizeBag> bags = new ArrayList<SpeechSynthesizeBag>();
+                                for (final String str : text) {
+                                    log("\r\n收:" + str);
+                                    SpeechSynthesizeBag speechSynthesizeBag = new SpeechSynthesizeBag();
+                                    //需要合成的文本text的长度不能超过1024个GBK字节。
+                                    speechSynthesizeBag.setText(str);
+                                    speechSynthesizeBag.setUtteranceId("0");
+                                    bags.add(speechSynthesizeBag);
+                                }
+                                int result = mSpeechSynthesizer.batchSpeak(bags);
+                                log(result + "");
                             }
-                            int result = mSpeechSynthesizer.batchSpeak(bags);
-                            log(result + "");
-                        }
-                    });
-                } catch (JSONException e) {
-                    e.printStackTrace();
+                        });
+                        break;
                 }
+            } catch (JSONException e) {
+                e.printStackTrace();
             }
         }
     }
@@ -133,30 +163,27 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
         start();
     }
 
+    private void startInMain() {
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                start();
+            }
+        });
+    }
+
     private void start() {
+        System.out.println("MainActivity.start");
+        log("\r\nstart !!!");
         Map<String, Object> params = new LinkedHashMap<String, Object>();
-        String event = SpeechConstant.ASR_START; // 替换成测试的event
+        String event = SpeechConstant.ASR_START; //替换成测试的event
         params.put(SpeechConstant.ACCEPT_AUDIO_VOLUME, false);
         //params.put(SpeechConstant.VAD_ENDPOINT_TIMEOUT, 0); // 长语音
-        params.put(SpeechConstant.VAD_ENDPOINT_TIMEOUT, 800); // 静音800毫秒后断句返回识别结果
+        params.put(SpeechConstant.VAD_ENDPOINT_TIMEOUT, 400); // 静音400毫秒后断句返回识别结果
         params.put(SpeechConstant.VAD, SpeechConstant.VAD_DNN);
-//        (new AutoCheck(getApplicationContext(), new Handler() {
-//            public void handleMessage(Message msg) {
-//                if (msg.what == 100) {
-//                    AutoCheck autoCheck = (AutoCheck) msg.obj;
-//                    synchronized (autoCheck) {
-//                        String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
-//                        log(message + "\n");
-//                        ; // 可以用下面一行替代，在logcat中查看代码
-//                        // Log.w("AutoCheckMessage", message);
-//                    }
-//                }
-//            }
-//        }, false)).checkAsr(params);
-
+        (new AutoCheck(getApplicationContext(), handler, false)).checkAsr(params);
         String json = new JSONObject(params).toString(); // 这里可以替换成你需要测试的json
         asr.send(event, json, null, 0, 0);
-        log("输入参数：" + json);
     }
 
     private void log(final String log) {
@@ -182,7 +209,7 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
 
     @Override
     public void onSynthesizeStart(String s) {
-
+        isSpeak = true;
     }
 
     @Override
@@ -192,12 +219,13 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
 
     @Override
     public void onSynthesizeFinish(String s) {
-
+        isSpeak = false;
     }
 
     @Override
     public void onSpeechStart(String s) {
-
+        System.out.println("MainActivity.onSpeechStart");
+        isSpeak = true;
     }
 
     @Override
@@ -207,11 +235,15 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
 
     @Override
     public void onSpeechFinish(String s) {
-        start();
+        System.out.println("MainActivity.onSpeechFinish " + s);
+        isSpeak = false;
+        startInMain();
     }
 
     @Override
     public void onError(String s, SpeechError speechError) {
-
+        System.out.println("MainActivity.onError " + s);
+        isSpeak = false;
+        startInMain();
     }
 }
