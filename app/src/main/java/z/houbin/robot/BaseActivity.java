@@ -15,17 +15,8 @@ public class BaseActivity extends AppCompatActivity {
 
     public void requestPermission(String[] requestPermissions, PermissionCallBack permissionCallBack) {
         this.permissionCallBack = permissionCallBack;
-        List<String> needRequest = new ArrayList<>();
-        for (String permission : requestPermissions) {
-            if (ContextCompat.checkSelfPermission(getApplicationContext(), permission) != PackageManager.PERMISSION_GRANTED) {
-                if (ActivityCompat.shouldShowRequestPermissionRationale(this, permission)) {
-                    needRequest.add(permission);
-                }
-            }
-        }
-        String[] needRequestPermissions = needRequest.toArray(new String[]{});
-        if(needRequestPermissions.length != 0){
-            ActivityCompat.requestPermissions(this, needRequestPermissions, CODE_REQUEST_PERMISSION);
+        if(requestPermissions.length != 0){
+            ActivityCompat.requestPermissions(this, requestPermissions, CODE_REQUEST_PERMISSION);
         }
     }
 

@@ -1,6 +1,9 @@
 package z.houbin.robot;
 
 import android.Manifest;
+import android.app.usage.UsageStats;
+import android.content.Context;
+import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
@@ -29,14 +32,13 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import z.houbin.robot.device.DeviceManagerHandler;
+import z.houbin.robot.handler.AppHandler;
 import z.houbin.robot.tuling.Tuling;
 import z.houbin.robot.util.AutoCheck;
-import z.houbin.robot.util.SpeechUtils;
 
 public class MainActivity extends BaseActivity implements EventListener, SpeechSynthesizerListener {
     private String permissions[] = {Manifest.permission.RECORD_AUDIO,
-            Manifest.permission.ACCESS_NETWORK_STATE,
-            Manifest.permission.INTERNET,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.WRITE_EXTERNAL_STORAGE
     };
@@ -50,13 +52,13 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
         public void handleMessage(Message msg) {
             super.handleMessage(msg);
             if (msg.what == 100) {
-                AutoCheck autoCheck = (AutoCheck) msg.obj;
-                synchronized (autoCheck) {
-                    String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
-                    log(message + "\n");
-                    //可以用下面一行替代，在logcat中查看代码
-                    // Log.w("AutoCheckMessage", message);
-                }
+//                AutoCheck autoCheck = (AutoCheck) msg.obj;
+//                synchronized (autoCheck) {
+//                    String message = autoCheck.obtainErrorMessage(); // autoCheck.obtainAllMessage();
+//                    log(message + "\n");
+//                    //可以用下面一行替代，在logcat中查看代码
+//                    // Log.w("AutoCheckMessage", message);
+//                }
             }
         }
     };
@@ -104,7 +106,7 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
     @Override
     public void onEvent(String name, String params, byte[] data, int offset, int length) {
         try {
-            log("\r\n" + name);
+            //log("\r\n" + name);
         } catch (Exception e) {
             //e.printStackTrace();
         }
@@ -121,11 +123,14 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
             try {
                 JSONObject jsonObject = new JSONObject(params);
                 String type = jsonObject.getString("result_type");
-                log("\r\ntype:" + type);
+                //log("\r\ntype:" + type);
                 switch (type) {
                     case "final_result":
                         final String speak = jsonObject.getString("best_result");
                         log("\r\n发:" + speak);
+                        if (filter(speak)) {
+                            return;
+                        }
                         isSpeak = true;
                         tuling.request(speak, new Tuling.CallBack() {
                             @Override
@@ -156,6 +161,54 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
         }
     }
 
+    private boolean filter(String speak) {
+        //播放音乐什么都不做
+        AudioManager m = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+        if (m != null && m.isMusicActive()) {
+            return true;
+        }
+        if (speak.equals("获取正在运行的程序")) {
+            AppHandler handler = AppHandler.getInstance(getApplicationContext());
+            if (!handler.canGetRunningProcess()) {
+                handler.openUsageSeetings();
+            } else {
+                List<UsageStats> runningProcess = handler.getRunningProcess();
+                StringBuilder builder = new StringBuilder();
+                for (UsageStats process : runningProcess) {
+                    builder.append(process.getPackageName());
+                    builder.append("\t");
+                    builder.append(process.getTotalTimeInForeground());
+                    builder.append("\r\n");
+                }
+                log(builder.toString());
+            }
+            return true;
+        } else if (speak.contains("解锁")) {
+            DeviceManagerHandler handler = new DeviceManagerHandler(getApplicationContext());
+            handler.unLock();
+            return true;
+        } else if (speak.contains("锁屏")) {
+            DeviceManagerHandler handler = new DeviceManagerHandler(MainActivity.this);
+            handler.lock();
+            return true;
+        } else if (speak.contains("打开")) {
+            int start = speak.indexOf("打开");
+            String name = speak.substring(start + 2, speak.length());
+            if (TextUtils.isEmpty(name) || name.length() < 2) {
+                return false;
+            } else {
+                Data data = AppHandler.getInstance(getApplicationContext()).openApp(name);
+                if (data.getCode() == Data.SUCCESS) {
+                    return true;
+                } else if (data.getMsg() != null) {
+                    speak(data.getMsg());
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     public void wakeup(View view) {
     }
 
@@ -170,6 +223,10 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
                 start();
             }
         });
+    }
+
+    private void speak(String text) {
+        mSpeechSynthesizer.speak(text);
     }
 
     private void start() {
