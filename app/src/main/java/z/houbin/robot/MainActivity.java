@@ -3,6 +3,7 @@ package z.houbin.robot;
 import android.Manifest;
 import android.app.usage.UsageStats;
 import android.content.Context;
+import android.graphics.drawable.AnimationDrawable;
 import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
@@ -10,6 +11,8 @@ import android.os.Message;
 import android.text.TextUtils;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
@@ -35,6 +38,7 @@ import java.util.Map;
 import z.houbin.robot.device.DeviceManagerHandler;
 import z.houbin.robot.handler.AppHandler;
 import z.houbin.robot.tuling.Tuling;
+import z.houbin.robot.ui.UiContainer;
 import z.houbin.robot.util.AutoCheck;
 
 public class MainActivity extends BaseActivity implements EventListener, SpeechSynthesizerListener {
@@ -63,6 +67,8 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
         }
     };
     private boolean isSpeak;
+    private UiContainer container;
+    private AnimationDrawable microDrawable;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,7 +87,6 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
 
         log = findViewById(R.id.log);
         log.setMovementMethod(new ScrollingMovementMethod());
-        scrollView = (ScrollView) this.log.getParent();
         tuling = new Tuling();
 
         mSpeechSynthesizer = SpeechSynthesizer.getInstance();
@@ -101,6 +106,22 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
                 mSpeechSynthesizer.initTts(TtsMode.ONLINE);
             }
         }.start();
+
+        container = new UiContainer((LinearLayout) findViewById(R.id.container));
+        ImageView microAnim = findViewById(R.id.micro_anim);
+        microDrawable = (AnimationDrawable) microAnim.getBackground();
+        microDrawable.setOneShot(true);
+        microAnim.setClickable(true);
+        microAnim.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                microDrawable.setOneShot(true);
+                if (microDrawable.isRunning()) {
+                    microDrawable.stop();
+                }
+                microDrawable.start();
+            }
+        });
     }
 
     @Override
@@ -127,6 +148,7 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
                 switch (type) {
                     case "final_result":
                         final String speak = jsonObject.getString("best_result");
+                        container.right(speak);
                         log("\r\n发:" + speak);
                         if (filter(speak)) {
                             return;
@@ -143,6 +165,7 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
                                 List<SpeechSynthesizeBag> bags = new ArrayList<SpeechSynthesizeBag>();
                                 for (final String str : text) {
                                     log("\r\n收:" + str);
+                                    container.left(str);
                                     SpeechSynthesizeBag speechSynthesizeBag = new SpeechSynthesizeBag();
                                     //需要合成的文本text的长度不能超过1024个GBK字节。
                                     speechSynthesizeBag.setText(str);
@@ -247,8 +270,8 @@ public class MainActivity extends BaseActivity implements EventListener, SpeechS
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                MainActivity.this.log.append(log);
-                scrollView.fullScroll(ScrollView.FOCUS_DOWN);
+                //MainActivity.this.log.append(log);
+                //scrollView.fullScroll(ScrollView.FOCUS_DOWN);
             }
         });
     }
